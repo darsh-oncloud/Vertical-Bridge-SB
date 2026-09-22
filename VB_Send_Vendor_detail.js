@@ -141,7 +141,12 @@ define(['N/search', 'N/https'], (search, https) => {
 
             log.audit('VB API Response Code', response.code);
             log.audit('VB API Response Body', response.body);
-          
+
+            if (response.code >= 200 && response.code < 300) {
+               log.audit('VB Vendor API', 'SUCCESS - Vendor ' + vendorId + ' sent successfully');
+            } else {
+                log.error('VB Vendor API', 'FAILED - Vendor ' + vendorId + ' | Code: ' + response.code + ' | Response: ' + response.body);
+            }
 
 
         } catch (e) {

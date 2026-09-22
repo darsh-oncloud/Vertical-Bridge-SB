@@ -40,10 +40,7 @@ define(['N/search', 'N/https'], (search, https) => {
                         email: result.getValue({name: 'email'}) || null,
                         phone: result.getValue({name: 'phone'}) || null,
                         isinactive: result.getValue({name: 'isinactive'}) ? 'T' : 'F',
-
-                        // Primary subsidiary NAME
                         subsidiary: result.getText({name: 'subsidiarynohierarchy'}) || result.getValue({name: 'subsidiarynohierarchy'}) || null,
-
                         currency: '1',
                         terms: result.getValue({name: 'terms'}) || null,
                         category: result.getValue({name: 'category'}) || null,
@@ -120,25 +117,26 @@ define(['N/search', 'N/https'], (search, https) => {
 
             const payloadString = JSON.stringify(payload);
 
-            log.audit('Vendor Data', JSON.stringify(vendor));
             log.audit('Address Count', addresses.length);
-            log.audit('Address Data', JSON.stringify(addresses));
             log.audit('Subsidiary Count', subsidiaries.length);
             log.audit('Payload Length', payloadString.length);
-            log.audit('FINAL VB VENDOR PAYLOAD', payloadString);
+
+            for (let i = 0; i < payloadString.length; i += 3500) {
+                log.audit('VB Payload Part ' + ((i / 3500) + 1), payloadString.substring(i, i + 3500));
+            }
 
 
-            // =====================================================
-            // TESTING ONLY
-            // NOTHING IS BEING SENT
-            // =====================================================
+            // =========================================================
+            // API SEND - CURRENTLY COMMENTED OUT
+            // REMOVE /* AND */ BELOW WHEN READY TO SEND
+            // =========================================================
 
             /*
             const response = https.post({
                 url: 'https://apdev.verticalbridge.com/VendorApi/vendor',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-api-key': 'API_KEY_HERE'
+                    'x-api-key': 'YOUR_DEV_API_KEY'
                 },
                 body: payloadString
             });
@@ -146,6 +144,7 @@ define(['N/search', 'N/https'], (search, https) => {
             log.audit('VB API Response Code', response.code);
             log.audit('VB API Response Body', response.body);
             */
+
 
         } catch (e) {
             log.error('VB Vendor Integration Error', e);

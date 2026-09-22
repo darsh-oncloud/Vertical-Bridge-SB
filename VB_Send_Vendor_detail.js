@@ -40,7 +40,10 @@ define(['N/search', 'N/https'], (search, https) => {
                         email: result.getValue({name: 'email'}) || null,
                         phone: result.getValue({name: 'phone'}) || null,
                         isinactive: result.getValue({name: 'isinactive'}) ? 'T' : 'F',
-                        subsidiary: result.getValue({name: 'subsidiarynohierarchy'}) || null,
+
+                        // Primary subsidiary NAME
+                        subsidiary: result.getText({name: 'subsidiarynohierarchy'}) || result.getValue({name: 'subsidiarynohierarchy'}) || null,
+
                         currency: '1',
                         terms: result.getValue({name: 'terms'}) || null,
                         category: result.getValue({name: 'category'}) || null,
@@ -82,14 +85,15 @@ define(['N/search', 'N/https'], (search, https) => {
                     });
                 }
 
-                const subsidiaryId = result.getValue({name: 'namenohierarchy', join: 'mseSubsidiary'});
+                const subsidiaryInternalId = result.getValue({name: 'internalid', join: 'mseSubsidiary'});
+                const subsidiaryName = result.getValue({name: 'namenohierarchy', join: 'mseSubsidiary'});
 
-                if (subsidiaryId && !subsidiarySeen[subsidiaryId]) {
-                    subsidiarySeen[subsidiaryId] = true;
+                if (subsidiaryInternalId && subsidiaryName && !subsidiarySeen[subsidiaryInternalId]) {
+                    subsidiarySeen[subsidiaryInternalId] = true;
 
                     subsidiaries.push({
                         entity: String(vendorId),
-                        subsidiary: String(subsidiaryId)
+                        subsidiary: String(subsidiaryName)
                     });
                 }
 
@@ -114,12 +118,14 @@ define(['N/search', 'N/https'], (search, https) => {
                 allow_empty_subsidiaries: false
             };
 
+            const payloadString = JSON.stringify(payload);
+
             log.audit('Vendor Data', JSON.stringify(vendor));
             log.audit('Address Count', addresses.length);
             log.audit('Address Data', JSON.stringify(addresses));
             log.audit('Subsidiary Count', subsidiaries.length);
-            log.audit('Subsidiary Data', JSON.stringify(subsidiaries));
-            log.audit('FINAL VB VENDOR PAYLOAD', JSON.stringify(payload));
+            log.audit('Payload Length', payloadString.length);
+            log.audit('FINAL VB VENDOR PAYLOAD', payloadString);
 
 
             // =====================================================
@@ -134,7 +140,7 @@ define(['N/search', 'N/https'], (search, https) => {
                     'Content-Type': 'application/json',
                     'x-api-key': 'API_KEY_HERE'
                 },
-                body: JSON.stringify(payload)
+                body: payloadString
             });
 
             log.audit('VB API Response Code', response.code);

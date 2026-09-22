@@ -4,6 +4,9 @@
  */
 define(['N/search', 'N/https'], (search, https) => {
 
+    // Converts checkbox values (boolean or 'T'/'F') to 'T'/'F'
+    const toTF = (v) => (v === true || v === 'T') ? 'T' : 'F';
+
     const afterSubmit = (context) => {
         try {
             if (context.type !== context.UserEventType.CREATE && context.type !== context.UserEventType.EDIT) return;
@@ -28,8 +31,9 @@ define(['N/search', 'N/https'], (search, https) => {
             let subsidiarySeen = {};
             let defaultBillingAddress = null;
 
-            vendorSearch.run().each(result => {
+            const processResult = (result) => {
 
+                // ---------- Vendor (first row only) ----------
                 if (!vendor) {
                     vendor = {
                         id: String(vendorId),
@@ -39,36 +43,37 @@ define(['N/search', 'N/https'], (search, https) => {
                         altname: result.getValue({name: 'altname'}) || null,
                         email: result.getValue({name: 'email'}) || null,
                         phone: result.getValue({name: 'phone'}) || null,
-                        isinactive: result.getValue({name: 'isinactive'}) ? 'T' : 'F',
-                        subsidiary: result.getText({name: 'subsidiarynohierarchy'}) || result.getValue({name: 'subsidiarynohierarchy'}) || null,
-                        currency: '1',
+                        isinactive: toTF(result.getValue({name: 'isinactive'})),
+                        subsidiary: result.getValue({name: 'subsidiarynohierarchy'}) || null,     // internal ID
+                        currency: result.getValue({name: 'currency'}) || null,                    // requires Currency column in saved search
                         terms: result.getValue({name: 'terms'}) || null,
                         category: result.getValue({name: 'category'}) || null,
                         datecreated: result.getValue({name: 'datecreated'}) || null,
                         lastmodifieddate: result.getValue({name: 'lastmodifieddate'}) || null,
                         defaultbillingaddress: null,
-                        is1099eligible: result.getValue({name: 'is1099eligible'}) ? 'T' : 'F',
-                        custentity_vb_ext_id_method_payment: result.getValue({name: 'custentity_vb_ext_id_method_payment'}) || null,
+                        is1099eligible: toTF(result.getValue({name: 'is1099eligible'})),
+                        custentity_vb_ext_id_method_payment: result.getText({name: 'custentity_vb_ext_id_method_payment'}) || null, // text, e.g. "ACH"
                         custentity_paymentmethod: result.getValue({name: 'custentity_paymentmethod'}) || null
                     };
                 }
 
+                // ---------- Addresses ----------
                 const addressId = result.getValue({name: 'addressinternalid', join: 'Address'});
 
                 if (addressId && !addressSeen[addressId]) {
                     addressSeen[addressId] = true;
 
-                    const defaultBilling = result.getValue({name: 'isdefaultbilling', join: 'Address'});
-                    const defaultShipping = result.getValue({name: 'isdefaultshipping', join: 'Address'});
+                    const defaultBilling = toTF(result.getValue({name: 'isdefaultbilling', join: 'Address'}));
+                    const defaultShipping = toTF(result.getValue({name: 'isdefaultshipping', join: 'Address'}));
 
-                    if (defaultBilling === true || defaultBilling === 'T') defaultBillingAddress = String(addressId);
+                    if (defaultBilling === 'T') defaultBillingAddress = String(addressId);
 
                     addresses.push({
                         vendor_id: String(vendorId),
                         address_id: String(addressId),
                         label: result.getValue({name: 'addresslabel', join: 'Address'}) || null,
-                        defaultbilling: (defaultBilling === true || defaultBilling === 'T') ? 'T' : 'F',
-                        defaultshipping: (defaultShipping === true || defaultShipping === 'T') ? 'T' : 'F',
+                        defaultbilling: defaultBilling,
+                        defaultshipping: defaultShipping,
                         addressee: result.getValue({name: 'addressee', join: 'Address'}) || null,
                         attention: result.getValue({name: 'attention', join: 'Address'}) || null,
                         addr1: result.getValue({name: 'address1', join: 'Address'}) || null,
@@ -82,19 +87,24 @@ define(['N/search', 'N/https'], (search, https) => {
                     });
                 }
 
+                // ---------- Subsidiaries (internal IDs) ----------
                 const subsidiaryInternalId = result.getValue({name: 'internalid', join: 'mseSubsidiary'});
-                const subsidiaryName = result.getValue({name: 'namenohierarchy', join: 'mseSubsidiary'});
 
-                if (subsidiaryInternalId && subsidiaryName && !subsidiarySeen[subsidiaryInternalId]) {
+                if (subsidiaryInternalId && !subsidiarySeen[subsidiaryInternalId]) {
                     subsidiarySeen[subsidiaryInternalId] = true;
 
                     subsidiaries.push({
                         entity: String(vendorId),
-                        subsidiary: String(subsidiaryName)
+                        subsidiary: String(subsidiaryInternalId)
                     });
                 }
+            };
 
-                return true;
+            // Paged run avoids the 4,000-row limit of run().each()
+            // (rows = addresses x subsidiaries)
+            const paged = vendorSearch.runPaged({pageSize: 1000});
+            paged.pageRanges.forEach(range => {
+                paged.fetch({index: range.index}).data.forEach(processResult);
             });
 
             if (!vendor) {
@@ -121,8 +131,9 @@ define(['N/search', 'N/https'], (search, https) => {
             log.audit('Subsidiary Count', subsidiaries.length);
             log.audit('Payload Length', payloadString.length);
 
+            // '>> ' prefix stops the Execution Log UI from reformatting the JSON fragments
             for (let i = 0; i < payloadString.length; i += 3500) {
-                log.audit('VB Payload Part ' + ((i / 3500) + 1), payloadString.substring(i, i + 3500));
+                log.audit('VB Payload Part ' + ((i / 3500) + 1), '>> ' + payloadString.substring(i, i + 3500));
             }
 
 

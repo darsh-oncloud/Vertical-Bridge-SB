@@ -134,7 +134,6 @@ define(['N/search', 'N/https'], (search, https) => {
                 url: 'https://apdev.verticalbridge.com/VendorApi/vendor',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Accept': 'application/json',
                     'x-api-key': 'Vbd39KmpZLzm2ldP8qxSA67bmKAcjWotfNczVFxV4rI'
                 },
                 body: payloadString

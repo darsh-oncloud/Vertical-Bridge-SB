@@ -127,23 +127,21 @@ define(['N/search', 'N/https'], (search, https) => {
 
 
             // =========================================================
-            // API SEND - CURRENTLY COMMENTED OUT
-            // REMOVE /* AND */ BELOW WHEN READY TO SEND
+            // API SEND
             // =========================================================
-
-            /*
+        
             const response = https.post({
                 url: 'https://apdev.verticalbridge.com/VendorApi/vendor',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-api-key': 'YOUR_DEV_API_KEY'
+                    'x-api-key': 'Vbd39KmpZLzm2ldP8qxSA67bmKAcjWotfNczVFxV4rI'
                 },
                 body: payloadString
             });
 
             log.audit('VB API Response Code', response.code);
             log.audit('VB API Response Body', response.body);
-            */
+          
 
 
         } catch (e) {

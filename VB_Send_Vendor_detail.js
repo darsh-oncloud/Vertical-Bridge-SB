@@ -12,7 +12,7 @@ define(['N/search', 'N/https'], (search, https) => {
             log.audit('Vendor ID', vendorId);
 
             const vendorSearch = search.load({
-                id: 'customsearch1790093012491'
+                id: 'customsearch_vb_vendor_detail'
             });
 
             vendorSearch.filters.push(search.createFilter({

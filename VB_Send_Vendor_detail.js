@@ -82,7 +82,7 @@ define(['N/search', 'N/https'], (search, https) => {
                     });
                 }
 
-                const subsidiaryId = result.getValue({name: 'internalid', join: 'mseSubsidiary'});
+                const subsidiaryId = result.getValue({name: 'namenohierarchy', join: 'mseSubsidiary'});
 
                 if (subsidiaryId && !subsidiarySeen[subsidiaryId]) {
                     subsidiarySeen[subsidiaryId] = true;

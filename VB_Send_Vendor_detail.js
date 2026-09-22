@@ -90,7 +90,7 @@ define(['N/search', 'N/https'], (search, https) => {
 
                     subsidiaries.push({
                         entity: String(vendorId),
-                        subsidiary: String(subsidiaryName)
+                        subsidiary: String(subsidiaryInternalId)
                     });
                 }
 
@@ -134,7 +134,7 @@ define(['N/search', 'N/https'], (search, https) => {
                 url: 'https://apdev.verticalbridge.com/VendorApi/vendor',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-api-key': 'Vbd39KmpZLzm2ldP8qxSA67bmKAcjWotfNczVFxV4rI='
+                    'x-api-key': 'VBd39KmpZLzm2ldP8qxSA67bmKAcjWotfNczVFxV4rI='
                 },
                 body: payloadString
             });

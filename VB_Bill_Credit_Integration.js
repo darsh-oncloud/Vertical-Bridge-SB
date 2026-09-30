@@ -3,382 +3,192 @@
  * @NScriptType Restlet
  * @NModuleScope SameAccount
  */
-define(['N/record', 'N/format', 'N/log', 'N/search'], function (record, format, log, search) {
+define(['N/record', 'N/format', 'N/log'], (record, format, log) => {
 
-  function isEmpty(v) {
-    return v === null || v === undefined || String(v).trim() === '';
-  }
+    const empty = v => v === null || v === undefined || String(v).trim() === '';
+    const date = v => format.parse({ value: String(v), type: format.Type.DATE });
 
-  function isObject(o) {
-    return o && typeof o === 'object' && !Array.isArray(o);
-  }
+    function setBody(rec, data) {
+        const skip = ['recordType', 'purchaseOrderId', 'item', 'expense'];
 
-  function parseNsDate(v) {
-    if (isEmpty(v)) return null;
-    return format.parse({
-      value: String(v),
-      type: format.Type.DATE
-    });
-  }
+        Object.keys(data).forEach(f => {
+            if (skip.includes(f) || empty(data[f]) || typeof data[f] === 'object') return;
 
-  function respSuccess(data) {
-    return {
-      Status: 'success',
-      Code: 200,
-      Message: 'Record processed successfully',
-      Data: data
-    };
-  }
-
-  function respFail(code, msg) {
-    return {
-      Status: 'failed',
-      Code: code,
-      Message: msg
-    };
-  }
-
-  function setBodyFields(recObj, payload) {
-    for (var k in payload) {
-      if (!payload.hasOwnProperty(k)) continue;
-
-      if (
-        k === 'expense' ||
-        k === 'item' ||
-        k === 'customform' ||
-        k === 'customform1' ||
-        k === 'usertotal'
-      ) {
-        continue;
-      }
-
-      var val = payload[k];
-      if (isEmpty(val)) continue;
-
-      if (k === 'trandate' || k === 'duedate') {
-        var d = parseNsDate(val);
-        if (d) {
-          recObj.setValue({
-            fieldId: k,
-            value: d
-          });
-        }
-      } else {
-        recObj.setValue({
-          fieldId: k,
-          value: val
+            try {
+                let value = ['trandate', 'duedate'].includes(f) ? date(data[f]) : data[f];
+                rec.setValue({ fieldId: f, value });
+                log.debug('BODY SET', `${f} = ${data[f]}`);
+            } catch (e) {
+                log.error(`BODY FIELD ERROR: ${f}`, e.message);
+                throw e;
+            }
         });
-      }
-    }
-  }
-
-  function setLineFields(recObj, sublistId, lineObj) {
-    for (var k in lineObj) {
-      if (!lineObj.hasOwnProperty(k)) continue;
-      if (k === 'transactiontype') continue;
-
-      var val = lineObj[k];
-      if (isEmpty(val)) continue;
-
-      recObj.setCurrentSublistValue({
-        sublistId: sublistId,
-        fieldId: k,
-        value: val
-      });
-    }
-  }
-
-  function splitLines(lines) {
-    var out = {
-      debit: [],
-      credit: []
-    };
-
-    if (!Array.isArray(lines)) return out;
-
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i];
-      if (!isObject(line)) continue;
-
-      var type = String(line.transactiontype || 'Debit').toLowerCase();
-
-      if (type === 'credit') {
-        out.credit.push(line);
-      } else {
-        out.debit.push(line);
-      }
     }
 
-    return out;
-  }
+    function setLine(rec, sublist, line) {
+        Object.keys(line).forEach(f => {
+            if (['orderline', 'item'].includes(f) || empty(line[f])) return;
 
-  function createTransaction(recType, payload, expenseLines) {
-    var recObj = record.create({
-      type: recType,
-      isDynamic: true
-    });
-
-    setBodyFields(recObj, payload);
-
-    for (var i = 0; i < expenseLines.length; i++) {
-      recObj.selectNewLine({
-        sublistId: 'expense'
-      });
-
-      setLineFields(recObj, 'expense', expenseLines[i]);
-
-      recObj.commitLine({
-        sublistId: 'expense'
-      });
+            try {
+                rec.setCurrentSublistValue({ sublistId: sublist, fieldId: f, value: line[f] });
+                log.debug('LINE SET', `${f} = ${line[f]}`);
+            } catch (e) {
+                log.error(`LINE FIELD ERROR: ${f}`, e.message);
+                throw e;
+            }
+        });
     }
 
-    return recObj.save({
-      enableSourcing: true,
-      ignoreMandatoryFields: false
-    });
-  }
+    function createPO(data) {
+        const rec = record.create({ type: record.Type.PURCHASE_ORDER, isDynamic: true });
 
-  function approveVendorBill(billId) {
-    if (isEmpty(billId)) return false;
+        setBody(rec, data);
 
-    record.submitFields({
-      type: record.Type.VENDOR_BILL,
-      id: billId,
-      values: {
-        approvalstatus: 2
-      },
-      options: {
-        enableSourcing: false,
-        ignoreMandatoryFields: true
-      }
-    });
+        (data.item || []).forEach((line, i) => {
+            rec.selectNewLine({ sublistId: 'item' });
 
-    return true;
-  }
+            rec.setCurrentSublistValue({
+                sublistId: 'item',
+                fieldId: 'item',
+                value: line.item
+            });
 
-  function getBillApprovalStatus(billId) {
-    if (isEmpty(billId)) return '';
+            setLine(rec, 'item', line);
+            rec.commitLine({ sublistId: 'item' });
 
-    var data = search.lookupFields({
-      type: record.Type.VENDOR_BILL,
-      id: billId,
-      columns: ['approvalstatus']
-    });
-
-    if (data && data.approvalstatus && data.approvalstatus.length > 0) {
-      return data.approvalstatus[0].text || '';
-    }
-
-    return '';
-  }
-
-  function applyVendorCredit(creditId, billId) {
-    var appliedBills = [];
-
-    if (isEmpty(creditId) || isEmpty(billId)) {
-      return appliedBills;
-    }
-
-    var vc = record.load({
-      type: record.Type.VENDOR_CREDIT,
-      id: creditId,
-      isDynamic: true
-    });
-
-    var lineCount = vc.getLineCount({
-      sublistId: 'apply'
-    });
-
-    log.debug('Vendor Credit Apply Line Count', {
-      creditId: creditId,
-      billId: billId,
-      lineCount: lineCount
-    });
-
-    if (!lineCount || lineCount <= 0) {
-      return appliedBills;
-    }
-
-    var creditTotal = parseFloat(vc.getValue({
-      fieldId: 'usertotal'
-    })) || 0;
-
-    if (creditTotal <= 0) {
-      return appliedBills;
-    }
-
-    for (var i = 0; i < lineCount; i++) {
-      var applyBillId = vc.getSublistValue({
-        sublistId: 'apply',
-        fieldId: 'internalid',
-        line: i
-      });
-
-      log.debug('Apply Line Check', {
-        applyBillId: applyBillId,
-        targetBillId: billId
-      });
-
-      if (String(applyBillId) === String(billId)) {
-        vc.selectLine({
-          sublistId: 'apply',
-          line: i
+            log.debug('PO LINE CREATED', { line: i + 1, item: line.item });
         });
 
-        var due = parseFloat(vc.getCurrentSublistValue({
-          sublistId: 'apply',
-          fieldId: 'due'
-        })) || 0;
+        return rec.save({ enableSourcing: true, ignoreMandatoryFields: false });
+    }
 
-        var applyAmt = due < creditTotal ? due : creditTotal;
+    function findLine(rec, data) {
+        const count = rec.getLineCount({ sublistId: 'item' });
 
-        if (applyAmt > 0) {
-          vc.setCurrentSublistValue({
-            sublistId: 'apply',
-            fieldId: 'apply',
-            value: true
-          });
+        for (let i = 0; i < count; i++) {
+            const item = rec.getSublistValue({
+                sublistId: 'item',
+                fieldId: 'item',
+                line: i
+            });
 
-          vc.setCurrentSublistValue({
-            sublistId: 'apply',
-            fieldId: 'amount',
-            value: applyAmt
-          });
+            const orderline = rec.getSublistValue({
+                sublistId: 'item',
+                fieldId: 'orderline',
+                line: i
+            });
 
-          appliedBills.push({
-            billId: String(applyBillId),
-            amount: applyAmt
-          });
+            if (
+                (!empty(data.orderline) && String(orderline) === String(data.orderline)) ||
+                (empty(data.orderline) && !empty(data.item) && String(item) === String(data.item))
+            ) return i;
         }
 
-        vc.commitLine({
-          sublistId: 'apply'
+        return -1;
+    }
+
+    function transformPO(data, toType) {
+        if (empty(data.purchaseOrderId)) throw Error('purchaseOrderId is required');
+
+        const rec = record.transform({
+            fromType: record.Type.PURCHASE_ORDER,
+            fromId: data.purchaseOrderId,
+            toType,
+            isDynamic: true
         });
 
-        break;
-      }
-    }
+        setBody(rec, data);
 
-    if (appliedBills.length > 0) {
-      vc.save({
-        enableSourcing: true,
-        ignoreMandatoryFields: false
-      });
-    }
+        if (toType === record.Type.ITEM_RECEIPT) {
+            const count = rec.getLineCount({ sublistId: 'item' });
 
-    return appliedBills;
-  }
-
-  function doPost(context) {
-    try {
-      log.audit('RESTlet POST Started', {
-        entity: context && context.entity,
-        tranid: context && context.tranid
-      });
-
-      if (!isObject(context)) {
-        return respFail(400, 'POST body must be a JSON object');
-      }
-
-      if (isEmpty(context.entity)) {
-        return respFail(400, 'Missing required field: entity');
-      }
-
-      var expenseSplit = splitLines(context.expense);
-
-      var hasDebit = expenseSplit.debit.length > 0;
-      var hasCredit = expenseSplit.credit.length > 0;
-
-      if (!hasDebit && !hasCredit) {
-        return respFail(400, 'Payload must include Debit or Credit lines in expense array');
-      }
-
-      var result = {
-        vendorBillId: null,
-        vendorCreditId: null,
-        billApproved: false,
-        billApprovalStatus: '',
-        appliedBills: [],
-        applyMessage: ''
-      };
-
-      var shouldApproveBill = hasDebit && hasCredit;
-
-      if (hasDebit) {
-        result.vendorBillId = createTransaction(
-          record.Type.VENDOR_BILL,
-          context,
-          expenseSplit.debit
-        );
-
-        if (shouldApproveBill) {
-          approveVendorBill(result.vendorBillId);
-          result.billApproved = true;
-          result.billApprovalStatus = getBillApprovalStatus(result.vendorBillId);
-        } else {
-          result.billApprovalStatus = getBillApprovalStatus(result.vendorBillId);
+            for (let i = 0; i < count; i++) {
+                rec.selectLine({ sublistId: 'item', line: i });
+                rec.setCurrentSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'itemreceive',
+                    value: false
+                });
+                rec.commitLine({ sublistId: 'item' });
+            }
         }
-      }
 
-      if (hasCredit) {
-        result.vendorCreditId = createTransaction(
-          record.Type.VENDOR_CREDIT,
-          context,
-          expenseSplit.credit
-        );
-      }
+        (data.item || []).forEach(line => {
+            const i = findLine(rec, line);
 
-      if (result.vendorCreditId && result.vendorBillId) {
-        result.appliedBills = applyVendorCredit(
-          result.vendorCreditId,
-          result.vendorBillId
-        );
+            if (i === -1) {
+                log.error('LINE NOT FOUND', line);
+                return;
+            }
 
-        if (result.appliedBills.length > 0) {
-          result.applyMessage = 'Vendor Credit applied to Vendor Bill successfully.';
-        } else {
-          result.applyMessage = 'Vendor Credit created, but Vendor Bill was not found in Apply tab.';
-        }
-      } else if (result.vendorBillId && !result.vendorCreditId) {
-        result.applyMessage = 'Only Debit lines received. Vendor Bill created and kept in default approval status.';
-      } else if (result.vendorCreditId && !result.vendorBillId) {
-        result.applyMessage = 'Only Credit lines received. Vendor Credit created but not applied.';
-      }
+            rec.selectLine({ sublistId: 'item', line: i });
 
-      log.audit('RESTlet Success', result);
+            if (toType === record.Type.ITEM_RECEIPT) {
+                rec.setCurrentSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'itemreceive',
+                    value: true
+                });
+            }
 
-      return respSuccess(result);
+            setLine(rec, 'item', line);
+            rec.commitLine({ sublistId: 'item' });
 
-    } catch (e) {
-      log.error('RESTlet POST Error', e);
+            log.debug('TRANSFORM LINE UPDATED', {
+                line: i,
+                item: line.item,
+                orderline: line.orderline
+            });
+        });
 
-      var msg = e && e.message ? e.message : String(e);
-      var code = 500;
-      var name = e && e.name ? e.name : '';
-
-      if (
-        name === 'USER_ERROR' ||
-        name === 'SSS_MISSING_REQD_ARGUMENT' ||
-        name === 'INVALID_FLD_VALUE'
-      ) {
-        code = 400;
-      }
-
-      return respFail(code, msg);
+        return rec.save({ enableSourcing: true, ignoreMandatoryFields: false });
     }
-  }
 
-  function doGet(context) {
-    return {
-      Status: 'success',
-      Code: 200,
-      Message: 'success GET',
-      Params: context || {}
-    };
-  }
+    function post(data) {
+        try {
+            log.audit('RESTLET START', data);
 
-  return {
-    get: doGet,
-    post: doPost
-  };
+            if (!data || !data.recordType)
+                return { Status: 'failed', Message: 'recordType is required' };
+
+            const type = String(data.recordType).toLowerCase();
+            let id;
+
+            if (type === 'purchaseorder')
+                id = createPO(data);
+
+            else if (type === 'itemreceipt')
+                id = transformPO(data, record.Type.ITEM_RECEIPT);
+
+            else if (type === 'vendorbill')
+                id = transformPO(data, record.Type.VENDOR_BILL);
+
+            else
+                return { Status: 'failed', Message: `Invalid recordType: ${data.recordType}` };
+
+            log.audit('RECORD CREATED', { type, id });
+
+            return {
+                Status: 'success',
+                Code: 200,
+                recordType: type,
+                internalId: id
+            };
+
+        } catch (e) {
+            log.error('RESTLET ERROR', {
+                name: e.name,
+                message: e.message,
+                stack: e.stack
+            });
+
+            return {
+                Status: 'failed',
+                Code: 500,
+                Message: e.message
+            };
+        }
+    }
+
+    return { post };
 });

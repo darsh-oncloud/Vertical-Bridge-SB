@@ -1,384 +1,114 @@
+
 /**
  * @NApiVersion 2.1
  * @NScriptType Restlet
  * @NModuleScope SameAccount
  */
-define(['N/record', 'N/format', 'N/log', 'N/search'], function (record, format, log, search) {
+define(['N/record', 'N/format', 'N/log'], (record, format, log) => {
 
-  function isEmpty(v) {
-    return v === null || v === undefined || String(v).trim() === '';
-  }
+  function createTransaction(recType, payload, lines) {
+    const rec = record.create({ type: recType, isDynamic: true });
 
-  function isObject(o) {
-    return o && typeof o === 'object' && !Array.isArray(o);
-  }
+    for (const key in payload) {
+      if (['expense', 'item', 'customform', 'customform1', 'usertotal'].includes(key)) continue;
+      const value = payload[key];
+      if (value === null || value === undefined || value === '') continue;
 
-  function parseNsDate(v) {
-    if (isEmpty(v)) return null;
-    return format.parse({
-      value: String(v),
-      type: format.Type.DATE
-    });
-  }
+      rec.setValue({
+        fieldId: key,
+        value: ['trandate', 'duedate'].includes(key)
+          ? format.parse({ value: String(value), type: format.Type.DATE })
+          : value
+      });
+    }
 
-  function respSuccess(data) {
-    return {
-      Status: 'success',
-      Code: 200,
-      Message: 'Record processed successfully',
-      Data: data
-    };
-  }
+    lines.forEach(line => {
+      rec.selectNewLine({ sublistId: 'expense' });
 
-  function respFail(code, msg) {
-    return {
-      Status: 'failed',
-      Code: code,
-      Message: msg
-    };
-  }
-
-  function setBodyFields(recObj, payload) {
-    for (var k in payload) {
-      if (!payload.hasOwnProperty(k)) continue;
-
-      if (
-        k === 'expense' ||
-        k === 'item' ||
-        k === 'customform' ||
-        k === 'customform1' ||
-        k === 'usertotal'
-      ) {
-        continue;
+      for (const key in line) {
+        if (key === 'transactiontype' || line[key] === null || line[key] === undefined || line[key] === '') continue;
+        rec.setCurrentSublistValue({ sublistId: 'expense', fieldId: key, value: line[key] });
       }
 
-      var val = payload[k];
-      if (isEmpty(val)) continue;
-
-      if (k === 'trandate' || k === 'duedate') {
-        var d = parseNsDate(val);
-        if (d) {
-          recObj.setValue({
-            fieldId: k,
-            value: d
-          });
-        }
-      } else {
-        recObj.setValue({
-          fieldId: k,
-          value: val
-        });
-      }
-    }
-  }
-
-  function setLineFields(recObj, sublistId, lineObj) {
-    for (var k in lineObj) {
-      if (!lineObj.hasOwnProperty(k)) continue;
-      if (k === 'transactiontype') continue;
-
-      var val = lineObj[k];
-      if (isEmpty(val)) continue;
-
-      recObj.setCurrentSublistValue({
-        sublistId: sublistId,
-        fieldId: k,
-        value: val
-      });
-    }
-  }
-
-  function splitLines(lines) {
-    var out = {
-      debit: [],
-      credit: []
-    };
-
-    if (!Array.isArray(lines)) return out;
-
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i];
-      if (!isObject(line)) continue;
-
-      var type = String(line.transactiontype || 'Debit').toLowerCase();
-
-      if (type === 'credit') {
-        out.credit.push(line);
-      } else {
-        out.debit.push(line);
-      }
-    }
-
-    return out;
-  }
-
-  function createTransaction(recType, payload, expenseLines) {
-    var recObj = record.create({
-      type: recType,
-      isDynamic: true
+      rec.commitLine({ sublistId: 'expense' });
     });
 
-    setBodyFields(recObj, payload);
-
-    for (var i = 0; i < expenseLines.length; i++) {
-      recObj.selectNewLine({
-        sublistId: 'expense'
-      });
-
-      setLineFields(recObj, 'expense', expenseLines[i]);
-
-      recObj.commitLine({
-        sublistId: 'expense'
-      });
-    }
-
-    return recObj.save({
-      enableSourcing: true,
-      ignoreMandatoryFields: false
-    });
-  }
-
-  function approveVendorBill(billId) {
-    if (isEmpty(billId)) return false;
-
-    record.submitFields({
-      type: record.Type.VENDOR_BILL,
-      id: billId,
-      values: {
-        approvalstatus: 2
-      },
-      options: {
-        enableSourcing: false,
-        ignoreMandatoryFields: true
-      }
-    });
-
-    return true;
-  }
-
-  function getBillApprovalStatus(billId) {
-    if (isEmpty(billId)) return '';
-
-    var data = search.lookupFields({
-      type: record.Type.VENDOR_BILL,
-      id: billId,
-      columns: ['approvalstatus']
-    });
-
-    if (data && data.approvalstatus && data.approvalstatus.length > 0) {
-      return data.approvalstatus[0].text || '';
-    }
-
-    return '';
-  }
-
-  function applyVendorCredit(creditId, billId) {
-    var appliedBills = [];
-
-    if (isEmpty(creditId) || isEmpty(billId)) {
-      return appliedBills;
-    }
-
-    var vc = record.load({
-      type: record.Type.VENDOR_CREDIT,
-      id: creditId,
-      isDynamic: true
-    });
-
-    var lineCount = vc.getLineCount({
-      sublistId: 'apply'
-    });
-
-    log.debug('Vendor Credit Apply Line Count', {
-      creditId: creditId,
-      billId: billId,
-      lineCount: lineCount
-    });
-
-    if (!lineCount || lineCount <= 0) {
-      return appliedBills;
-    }
-
-    var creditTotal = parseFloat(vc.getValue({
-      fieldId: 'usertotal'
-    })) || 0;
-
-    if (creditTotal <= 0) {
-      return appliedBills;
-    }
-
-    for (var i = 0; i < lineCount; i++) {
-      var applyBillId = vc.getSublistValue({
-        sublistId: 'apply',
-        fieldId: 'internalid',
-        line: i
-      });
-
-      log.debug('Apply Line Check', {
-        applyBillId: applyBillId,
-        targetBillId: billId
-      });
-
-      if (String(applyBillId) === String(billId)) {
-        vc.selectLine({
-          sublistId: 'apply',
-          line: i
-        });
-
-        var due = parseFloat(vc.getCurrentSublistValue({
-          sublistId: 'apply',
-          fieldId: 'due'
-        })) || 0;
-
-        var applyAmt = due < creditTotal ? due : creditTotal;
-
-        if (applyAmt > 0) {
-          vc.setCurrentSublistValue({
-            sublistId: 'apply',
-            fieldId: 'apply',
-            value: true
-          });
-
-          vc.setCurrentSublistValue({
-            sublistId: 'apply',
-            fieldId: 'amount',
-            value: applyAmt
-          });
-
-          appliedBills.push({
-            billId: String(applyBillId),
-            amount: applyAmt
-          });
-        }
-
-        vc.commitLine({
-          sublistId: 'apply'
-        });
-
-        break;
-      }
-    }
-
-    if (appliedBills.length > 0) {
-      vc.save({
-        enableSourcing: true,
-        ignoreMandatoryFields: false
-      });
-    }
-
-    return appliedBills;
+    return rec.save({ enableSourcing: true, ignoreMandatoryFields: false });
   }
 
   function doPost(context) {
     try {
-      log.audit('RESTlet POST Started', {
-        entity: context && context.entity,
-        tranid: context && context.tranid
+      if (!context || !context.entity || !Array.isArray(context.expense) || !context.expense.length) {
+        return { Status: 'failed', Code: 400, Message: 'Vendor and expense lines are required.' };
+      }
+
+      let debit = 0, credit = 0, debitCount = 0, creditCount = 0;
+
+      context.expense.forEach((line, i) => {
+        const type = String(line.transactiontype || 'Debit').trim().toLowerCase();
+        const amount = Number(line.amount);
+
+        if (!['debit', 'credit'].includes(type) || !Number.isFinite(amount) || amount <= 0) {
+          throw new Error('Invalid transaction type or amount on line ' + (i + 1));
+        }
+
+        if (type === 'credit') { credit += Math.round(amount * 100); creditCount++; }
+        else { debit += Math.round(amount * 100); debitCount++; }
       });
 
-      if (!isObject(context)) {
-        return respFail(400, 'POST body must be a JSON object');
+      const net = (debit - credit) / 100;
+      if (net === 0) return { Status: 'failed', Code: 400, Message: 'Net amount is zero. No transaction created.' };
+
+      const isBill = net > 0;
+      const recType = isBill ? record.Type.VENDOR_BILL : record.Type.VENDOR_CREDIT;
+
+      // Debit + / Credit - for Bill; reverse signs for Vendor Credit
+      const lines = context.expense.map(line => {
+        const isCredit = String(line.transactiontype || 'Debit').trim().toLowerCase() === 'credit';
+        const amount = Math.round(Number(line.amount) * 100) / 100;
+        return { ...line, amount: amount * (isBill ? (isCredit ? -1 : 1) : (isCredit ? 1 : -1)) };
+      });
+
+      // Validate against Core header total before creating transaction
+      if (context.usertotal !== undefined && context.usertotal !== null &&
+          Math.round(Math.abs(Number(context.usertotal)) * 100) !== Math.round(Math.abs(net) * 100)) {
+        return { Status: 'failed', Code: 400, Message: 'Header total does not match calculated net amount: ' + net };
       }
 
-      if (isEmpty(context.entity)) {
-        return respFail(400, 'Missing required field: entity');
-      }
+      const id = createTransaction(recType, context, lines);
 
-      var expenseSplit = splitLines(context.expense);
+      // Preserve existing mixed-bill approval behavior
+      const approved = isBill && debitCount > 0 && creditCount > 0;
+      if (approved) record.submitFields({ type: record.Type.VENDOR_BILL, id, values: { approvalstatus: 2 } });
 
-      var hasDebit = expenseSplit.debit.length > 0;
-      var hasCredit = expenseSplit.credit.length > 0;
-
-      if (!hasDebit && !hasCredit) {
-        return respFail(400, 'Payload must include Debit or Credit lines in expense array');
-      }
-
-      var result = {
-        vendorBillId: null,
-        vendorCreditId: null,
-        billApproved: false,
-        billApprovalStatus: '',
-        appliedBills: [],
-        applyMessage: ''
+      const result = {
+        vendorBillId: isBill ? id : null,
+        vendorCreditId: isBill ? null : id,
+        transactionType: isBill ? 'Vendor Bill' : 'Vendor Credit',
+        calculation: {
+          totalDebit: debit / 100,
+          totalCredit: credit / 100,
+          netAmount: net,
+          transactionAmount: Math.abs(net),
+          debitLines: debitCount,
+          creditLines: creditCount,
+          totalLines: lines.length
+        },
+        billApproved: approved,
+        recordsCreated: 1
       };
 
-      var shouldApproveBill = hasDebit && hasCredit;
-
-      if (hasDebit) {
-        result.vendorBillId = createTransaction(
-          record.Type.VENDOR_BILL,
-          context,
-          expenseSplit.debit
-        );
-
-        if (shouldApproveBill) {
-          approveVendorBill(result.vendorBillId);
-          result.billApproved = true;
-          result.billApprovalStatus = getBillApprovalStatus(result.vendorBillId);
-        } else {
-          result.billApprovalStatus = getBillApprovalStatus(result.vendorBillId);
-        }
-      }
-
-      if (hasCredit) {
-        result.vendorCreditId = createTransaction(
-          record.Type.VENDOR_CREDIT,
-          context,
-          expenseSplit.credit
-        );
-      }
-
-      if (result.vendorCreditId && result.vendorBillId) {
-        result.appliedBills = applyVendorCredit(
-          result.vendorCreditId,
-          result.vendorBillId
-        );
-
-        if (result.appliedBills.length > 0) {
-          result.applyMessage = 'Vendor Credit applied to Vendor Bill successfully.';
-        } else {
-          result.applyMessage = 'Vendor Credit created, but Vendor Bill was not found in Apply tab.';
-        }
-      } else if (result.vendorBillId && !result.vendorCreditId) {
-        result.applyMessage = 'Only Debit lines received. Vendor Bill created and kept in default approval status.';
-      } else if (result.vendorCreditId && !result.vendorBillId) {
-        result.applyMessage = 'Only Credit lines received. Vendor Credit created but not applied.';
-      }
-
-      log.audit('RESTlet Success', result);
-
-      return respSuccess(result);
+      log.audit('Transaction Created', result);
+      return { Status: 'success', Code: 200, Message: 'Record processed successfully', Data: result };
 
     } catch (e) {
-      log.error('RESTlet POST Error', e);
-
-      var msg = e && e.message ? e.message : String(e);
-      var code = 500;
-      var name = e && e.name ? e.name : '';
-
-      if (
-        name === 'USER_ERROR' ||
-        name === 'SSS_MISSING_REQD_ARGUMENT' ||
-        name === 'INVALID_FLD_VALUE'
-      ) {
-        code = 400;
-      }
-
-      return respFail(code, msg);
+      log.error('RESTlet Error', e);
+      return { Status: 'failed', Code: 500, Message: e.message || String(e) };
     }
   }
 
-  function doGet(context) {
-    return {
-      Status: 'success',
-      Code: 200,
-      Message: 'success GET',
-      Params: context || {}
-    };
-  }
-
   return {
-    get: doGet,
+    get: context => ({ Status: 'success', Code: 200, Message: 'success GET', Params: context || {} }),
     post: doPost
   };
 });

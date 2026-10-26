@@ -6,14 +6,14 @@
 define(['N/record', 'N/search', 'N/format', 'N/log'], (record, search, format, log) => {
 
   function doPost(payload) {
-    let stage = 'Validation', tranid = '';
+    let stage = 'Validation', otherrefnum = '';
 
     try {
-      if (!payload?.tranid || !payload.entity || !Array.isArray(payload.expense) || !payload.expense.length)
-        return { Status: 'failed', Code: 400, Message: 'tranid, entity and expense lines are required.' };
+      if (!payload?.otherrefnum || !payload.entity || !Array.isArray(payload.expense) || !payload.expense.length)
+        return { Status: 'failed', Code: 400, Message: 'otherrefnum, entity and expense lines are required.' };
 
-      tranid = String(payload.tranid).trim();
-      if (!tranid) return { Status: 'failed', Code: 400, Message: 'Invalid tranid.' };
+      otherrefnum = String(payload.otherrefnum).trim();
+      if (!otherrefnum) return { Status: 'failed', Code: 400, Message: 'Invalid otherrefnum.' };
 
       for (const [i, line] of payload.expense.entries()) {
         if (!line.account || line.amount === null || line.amount === undefined ||
@@ -25,7 +25,7 @@ define(['N/record', 'N/search', 'N/format', 'N/log'], (record, search, format, l
       stage = 'Search Purchase Order';
       const results = search.create({
         type: record.Type.PURCHASE_ORDER,
-        filters: [['tranid', 'is', tranid], 'AND', ['mainline', 'is', 'T']],
+        filters: [['otherrefnum', 'is', otherrefnum], 'AND', ['mainline', 'is', 'T']],
         columns: ['internalid']
       }).run().getRange({ start: 0, end: 2 });
 
@@ -102,7 +102,7 @@ for (const key of ['customform', 'entity', 'subsidiary']) {
 
       const result = {
         purchaseOrderId: id,
-        tranid,
+        otherrefnum,
         action,
         previousLines: oldLines,
         totalLines: payload.expense.length,
@@ -120,12 +120,12 @@ for (const key of ['customform', 'entity', 'subsidiary']) {
       };
 
     } catch (e) {
-      log.error('PO RESTlet Error', { tranid, stage, error: e.message || String(e) });
+      log.error('PO RESTlet Error', { otherrefnum, stage, error: e.message || String(e) });
       return {
         Status: 'failed',
         Code: 500,
         Message: e.message || String(e),
-        TranId: tranid,
+        otherrefnum: otherrefnum,
         Stage: stage,
         ErrorCode: e.name || 'UNEXPECTED_ERROR'
       };

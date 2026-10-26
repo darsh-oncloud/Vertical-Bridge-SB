@@ -43,11 +43,16 @@ define(['N/record', 'N/search', 'N/format', 'N/log'], (record, search, format, l
 
       // Set form and primary fields first
       stage = 'Set Header Fields';
-      for (const key of ['customform', 'subsidiary', 'entity']) {
-        if (payload[key] !== undefined && payload[key] !== null && payload[key] !== '')
-          rec.setValue({ fieldId: key, value: payload[key] });
-      }
+      // for (const key of ['customform', 'subsidiary', 'entity']) {
+      //   if (payload[key] !== undefined && payload[key] !== null && payload[key] !== '')
+      //     rec.setValue({ fieldId: key, value: payload[key] });
+      // }
 
+for (const key of ['customform', 'entity', 'subsidiary']) {
+  if (payload[key] !== undefined && payload[key] !== null && payload[key] !== '')
+    rec.setValue({ fieldId: key, value: Number(payload[key]) });
+}
+      
       // Dynamically set all other header fields
       for (const [key, value] of Object.entries(payload)) {
         if (['expense', 'item', 'usertotal', 'transactiontype', 'customform1', 'duedate',
